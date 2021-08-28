@@ -2,7 +2,7 @@ import Head from "next/head";
 import Image from "next/image";
 import styles from "../styles/Home.module.css";
 
-import Rari from "../../../dist";
+import { Rari } from "../../../dist";
 import { useEffect, useState } from "react";
 
 export const turboGethURL = `https://turbogeth.crows.sh`;
