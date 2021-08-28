@@ -1,0 +1,12 @@
+{
+  "name": "my-server-app",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "npm run buildPackage && node index.js",
+    "buildPackage": "cd ../.. && npm run build"
+  },
+  "dependencies": {
+    "rari-sdk-sharad": "^1.0.15"
+  }
+}

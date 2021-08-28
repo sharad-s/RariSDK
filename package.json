@@ -13,12 +13,14 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "version": "npm run format && git add -A src",
     "postversion": "git push && git push --tags",
-    "example": "cd ./examples/next && npm i && npm run dev"
+    "example": "cd ./examples/next && npm i && npm run dev",
+    "example:server": "cd ./examples/server && npm i && npm run start"
   },
   "author": "",
   "license": "ISC",
   "devDependencies": {
     "@types/node": "^16.6.1",
+    "hardhat": "^2.6.1",
     "prettier": "^2.3.2",
     "tslint": "^6.1.3",
     "tslint-config-prettier": "^1.18.0",
@@ -26,7 +28,8 @@
   },
   "dependencies": {
     "axios": "^0.21.1",
-    "ethers": "^5.4.4"
+    "ethers": "^5.4.4",
+    "web3": "^1.5.2"
   },
   "files": [
     "dist/**/*"
