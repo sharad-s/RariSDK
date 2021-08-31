@@ -1,12 +1,13 @@
 /* eslint-disable */
 import Web3 from "web3";
-import { BigNumber, ethers, getDefaultProvider, utils } from "ethers";
+import { BigNumber, constants, ethers, getDefaultProvider, utils } from "ethers";
 
 import JumpRateModel from "./irm/JumpRateModel.js";
 import JumpRateModelV2 from "./irm/JumpRateModelV2.js";
 import DAIInterestRateModelV2 from "./irm/DAIInterestRateModelV2.js";
 import WhitePaperInterestRateModel from "./irm/WhitePaperInterestRateModel.js";
 import { createContract } from "../../utils/web3.js";
+import { computeSoliditySha3 } from "../../utils/hashUtils";
 
 import fusePoolDirectoryAbi from "./abi/FusePoolDirectory.json";
 import fusePoolLensAbi from "./abi/FusePoolLens.json";
@@ -17,6 +18,7 @@ import { contracts as openOracleContracts } from ".//contracts/open-oracle.min.j
 import { contracts as oracleContracts } from "./contracts/oracles.min.json";
 
 import axios from "axios";
+import { parseUnits } from "ethers/lib/utils";
 
 export default class Fuse {
   provider;
@@ -136,7 +138,7 @@ export default class Fuse {
         const usdPrice = (
           await axios.get("https://api.coingecko.com/api/v3/simple/price?vs_currencies=usd&ids=ethereum")
         ).data.ethereum.usd;
-        const usdPriceBN = ethers.utils.parseUnits(usdPrice.toString(), "ether");
+        const usdPriceBN = utils.parseUnits(usdPrice.toString(), "ether");
         return usdPriceBN;
       } catch (error) {
         throw new Error("Error retrieving data from Coingecko API: " + error);
@@ -154,6 +156,7 @@ export default class Fuse {
     this.openOracleContracts = openOracleContracts;
     this.oracleContracts = oracleContracts;
 
+    //
     this.getCreate2Address = function (creatorAddress, salts, byteCodeHash) {
       return `0x${this.web3.utils
         .sha3(
@@ -349,8 +352,8 @@ export default class Fuse {
           var tokenConfigs = [
             {
               underlying: "0x0000000000000000000000000000000000000000",
-              symbolHash: Web3.utils.soliditySha3("ETH"),
-              baseUnit: Web3.utils.toBN(1e18).toString(),
+              symbolHash: computeSoliditySha3("ETH"),
+              baseUnit: constants.WeiPerEther.toString(),
               priceSource: PriceSource.REPORTER,
               fixedPrice: 0,
               uniswapMarket: "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc",
@@ -600,20 +603,22 @@ export default class Fuse {
       bypassPriceFeedCheck,
     ) {
       // Check collateral factor
-      if (Web3.utils.toBN(collateralFactor).isNeg() || Web3.utils.toBN(collateralFactor).gt(Web3.utils.toBN(0.9e18)))
+      if (
+        BigNumber.from(collateralFactor).isNegative() ||
+        BigNumber.from(collateralFactor).gt(utils.parseUnits("0.9", 18))
+      )
         throw "Collateral factor must range from 0 to 0.9.";
 
       // Check reserve factor + admin fee + Fuse fee
-      if (Web3.utils.toBN(reserveFactor).isNeg()) throw "Reserve factor cannot be negative.";
-      if (Web3.utils.toBN(adminFee).isNeg()) throw "Admin fee cannot be negative.";
-      if (!Web3.utils.toBN(reserveFactor).isZero() || !Web3.utils.toBN(adminFee).isZero()) {
+      if (BigNumber.from(reserveFactor).isNegative()) throw "Reserve factor cannot be negative.";
+      if (BigNumber.from(adminFee).isNegative()) throw "Admin fee cannot be negative.";
+      if (!BigNumber.from(reserveFactor).isZero() || !BigNumber.from(adminFee).isZero()) {
         var fuseFee = await this.contracts.FuseFeeDistributor.methods.interestFeeRate().call();
         if (
-          Web3.utils
-            .toBN(reserveFactor)
-            .add(Web3.utils.toBN(adminFee))
-            .add(Web3.utils.toBN(fuseFee))
-            .gt(Web3.utils.toBN(1e18))
+          BigNumber.from(reserveFactor)
+            .add(BigNumber.from(adminFee))
+            .add(BigNumber.from(fuseFee))
+            .gt(BigNumber.from(constants.WeiPerEther))
         )
           throw "Sum of reserve factor and admin fee should range from 0 to " + (1 - parseInt(fuseFee) / 1e18) + ".";
       }
@@ -621,7 +626,7 @@ export default class Fuse {
       return conf.underlying !== undefined &&
         conf.underlying !== null &&
         conf.underlying.length > 0 &&
-        !Web3.utils.toBN(conf.underlying).isZero()
+        !BigNumber.from(conf.underlying).isZero()
         ? await this.deployCErc20(
             conf,
             supportMarket,
@@ -656,12 +661,12 @@ export default class Fuse {
       if (
         conf.initialExchangeRateMantissa === undefined ||
         conf.initialExchangeRateMantissa === null ||
-        Web3.utils.toBN(conf.initialExchangeRateMantissa).isZero()
+        BigNumber.from(conf.initialExchangeRateMantissa).isZero()
       )
-        conf.initialExchangeRateMantissa = Web3.utils
-          .toBN(0.02e18)
-          .mul(Web3.utils.toBN(1e18))
-          .div(Web3.utils.toBN(10).pow(Web3.utils.toBN(conf.decimals)));
+        conf.initialExchangeRateMantissa = utils
+          .parseUnits("0.02", 18)
+          .mul(constants.WeiPerEther)
+          .div(BigNumber.from(10).pow(BigNumber.from(conf.decimals)));
 
       // Deploy CEtherDelegate implementation contract if necessary
       if (!implementationAddress) {
@@ -734,17 +739,16 @@ export default class Fuse {
       if (
         conf.initialExchangeRateMantissa === undefined ||
         conf.initialExchangeRateMantissa === null ||
-        Web3.utils.toBN(conf.initialExchangeRateMantissa).isZero()
+        BigNumber.from(conf.initialExchangeRateMantissa).isZero()
       ) {
         var erc20 = new this.web3.eth.Contract(
           JSON.parse(contracts["contracts/EIP20Interface.sol:EIP20Interface"].abi),
           conf.underlying,
         );
         var underlyingDecimals = await erc20.methods.decimals().call();
-        conf.initialExchangeRateMantissa = Web3.utils
-          .toBN(0.02e18)
-          .mul(Web3.utils.toBN(10).pow(Web3.utils.toBN(underlyingDecimals)))
-          .div(Web3.utils.toBN(10).pow(Web3.utils.toBN(conf.decimals)));
+        conf.initialExchangeRateMantissa = utils.parseUnits("0.02", 18)
+          .mul(BigNumber.from(10).pow(BigNumber.from(underlyingDecimals)))
+          .div(BigNumber.from(10).pow(BigNumber.from(conf.decimals)));
       }
 
       // Get Comptroller
@@ -948,10 +952,10 @@ export default class Fuse {
               .add([
                 {
                   underlying: conf.underlying,
-                  symbolHash: Web3.utils.soliditySha3(underlyingSymbol),
-                  baseUnit: Web3.utils.toBN(10).pow(Web3.utils.toBN(underlyingDecimals)).toString(),
+                  symbolHash: computeSoliditySha3(underlyingSymbol),
+                  baseUnit: BigNumber.from(10).pow(BigNumber.from(underlyingDecimals)).toString(),
                   priceSource: PriceSource.FIXED_ETH,
-                  fixedPrice: Web3.utils.toBN(1e18).toString(),
+                  fixedPrice: constants.WeiPerEther.toString(),
                   uniswapMarket: "0x0000000000000000000000000000000000000000",
                   isUniswapReversed: false,
                 },
@@ -964,8 +968,8 @@ export default class Fuse {
                 .add([
                   {
                     underlying: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-                    symbolHash: Web3.utils.soliditySha3("USDC"),
-                    baseUnit: Web3.utils.toBN(1e6).toString(),
+                    symbolHash: computeSoliditySha3("USDC"),
+                    baseUnit: parseUnits("1.0", 6).toString(),
                     priceSource: PriceSource.FIXED_USD,
                     fixedPrice: 1e6,
                     uniswapMarket: "0x0000000000000000000000000000000000000000",
@@ -978,8 +982,8 @@ export default class Fuse {
                 .add([
                   {
                     underlying: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-                    symbolHash: Web3.utils.soliditySha3("USDC"),
-                    baseUnit: Web3.utils.toBN(1e6).toString(),
+                    symbolHash: computeSoliditySha3("USDC"),
+                    baseUnit: BigNumber.from(1e6).toString(),
                     priceSource: PriceSource.TWAP,
                     fixedPrice: 0,
                     uniswapMarket: "0xb4e16d0168e52d35cacd2c6185b44281ec28c9dc",
@@ -1002,10 +1006,10 @@ export default class Fuse {
                   .add([
                     {
                       underlying: conf.underlying,
-                      symbolHash: Web3.utils.soliditySha3(underlyingSymbol),
-                      baseUnit: Web3.utils.toBN(10).pow(Web3.utils.toBN(underlyingDecimals)).toString(),
+                      symbolHash: computeSoliditySha3(underlyingSymbol),
+                      baseUnit: BigNumber.from(10).pow(BigNumber.from(underlyingDecimals)).toString(),
                       priceSource: PriceSource.FIXED_ETH,
-                      fixedPrice: Web3.utils.toBN(1e18).toString(),
+                      fixedPrice: constants.WeiPerEther.toString(),
                       uniswapMarket: "0x0000000000000000000000000000000000000000",
                       isUniswapReversed: false,
                     },
@@ -1027,10 +1031,10 @@ export default class Fuse {
                   var tokenConfigs = [
                     {
                       underlying: conf.underlying,
-                      symbolHash: Web3.utils.soliditySha3(underlyingSymbol),
-                      baseUnit: Web3.utils.toBN(10).pow(Web3.utils.toBN(underlyingDecimals)).toString(),
+                      symbolHash: computeSoliditySha3(underlyingSymbol),
+                      baseUnit: BigNumber.from(10).pow(BigNumber.from(underlyingDecimals)).toString(),
                       priceSource: PriceSource.FIXED_USD,
-                      fixedPrice: Web3.utils.toBN(1e6).toString(),
+                      fixedPrice: parseUnits("1.0", 6).toString(),
                       uniswapMarket: "0x0000000000000000000000000000000000000000",
                       isUniswapReversed: false,
                     },
@@ -1045,10 +1049,10 @@ export default class Fuse {
                     } catch (error) {
                       tokenConfigs.push({
                         underlying: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-                        symbolHash: Web3.utils.soliditySha3("USDC"),
-                        baseUnit: Web3.utils.toBN(1e6).toString(),
+                        symbolHash: computeSoliditySha3("USDC"),
+                        baseUnit: BigNumber.from(1e6).toString(),
                         priceSource: PriceSource.TWAP,
-                        fixedPrice: 0,
+                        fixedPrice: "0",
                         uniswapMarket: "0xb4e16d0168e52d35cacd2c6185b44281ec28c9dc",
                         isUniswapReversed: false,
                       });
@@ -1106,8 +1110,8 @@ export default class Fuse {
                 .add([
                   {
                     underlying: conf.underlying,
-                    symbolHash: Web3.utils.soliditySha3(underlyingSymbol),
-                    baseUnit: Web3.utils.toBN(10).pow(Web3.utils.toBN(underlyingDecimals)).toString(),
+                    symbolHash: computeSoliditySha3(underlyingSymbol),
+                    baseUnit: BigNumber.from(10).pow(BigNumber.from(underlyingDecimals)).toString(),
                     priceSource: isUniswapAnchoredView ? PriceSource.REPORTER : PriceSource.TWAP,
                     fixedPrice: 0,
                     uniswapMarket: uniswapV2Pair,
@@ -1125,9 +1129,8 @@ export default class Fuse {
                 );
                 var reporter = await uniswapOrUniswapAnchoredView.methods.reporter().call();
                 if (
-                  Web3.utils
-                    .toBN(await priceData.methods.getPrice(reporter, underlyingSymbol).call())
-                    .gt(Web3.utils.toBN(0))
+                  BigNumber.from(await priceData.methods.getPrice(reporter, underlyingSymbol).call())
+                    .gt(constants.Zero)
                 )
                   await uniswapOrUniswapAnchoredView.methods
                     .postPrices([], [], [underlyingSymbol])
@@ -1158,6 +1161,4 @@ export default class Fuse {
     };
   }
 
-  static Web3 = Web3;
-  static BN = Web3.utils.BN;
 }
