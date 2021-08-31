@@ -2,6 +2,7 @@ import Rari from "./rari";
 import web3 from "web3";
 import { utils } from "ethers";
 
+
 const testHashes = (input1: string) => {
   const web3SoliditySha3 = web3.utils.soliditySha3(input1);
   const ethersSoliditySha3 = utils.solidityKeccak256(["string"], [input1]);
