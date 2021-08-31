@@ -1,6 +1,6 @@
 /* eslint-disable */
 import Web3 from "web3";
-import { BigNumber, constants, ContractFactory, ethers, getDefaultProvider, utils } from "ethers";
+import { BigNumber, constants, Contract, getDefaultProvider, utils, ContractFactory } from "ethers";
 
 import JumpRateModel from "./irm/JumpRateModel.js";
 import JumpRateModelV2 from "./irm/JumpRateModelV2.js";
@@ -156,7 +156,7 @@ export default class Fuse {
     this.openOracleContracts = openOracleContracts;
     this.oracleContracts = oracleContracts;
 
-    //
+    // TODO
     this.getCreate2Address = function (creatorAddress, salts, byteCodeHash) {
       return `0x${this.web3.utils
         .sha3(
@@ -196,26 +196,20 @@ export default class Fuse {
       let implementationAddress = Fuse.COMPTROLLER_IMPLEMENTATION_CONTRACT_ADDRESS;
 
       if (!implementationAddress) {
-        const comptroller = new this.web3.eth.Contract(
-          JSON.parse(contracts["contracts/Comptroller.sol:Comptroller"].abi),
-        );
-        const deployedComptroller = await comptroller
-          .deploy({
-            data: "0x" + contracts["contracts/Comptroller.sol:Comptroller"].bin,
-          })
-          .send(options);
+        const comptroller = new utils.Interface(JSON.parse(contracts["contracts/Comptroller.sol:Comptroller"].abi));
+        const contractFactory = new ContractFactory(JSON.parse(contracts["contracts/Comptroller.sol:Comptroller"].abi), contracts["contracts/Comptroller.sol:Comptroller"].bin, await this.provider.getSigner())
+        const deployedComptroller = await contractFactory.deploy(options);
+        // const deployedComptroller = await comptroller.deploy({ data: "0x" + contracts["contracts/Comptroller.sol:Comptroller"].bin,}).send(options);
 
+        /// TODO test contract deployment
         // Reset the implementation Address to the newly deployed Comptroller's Address
         implementationAddress = deployedComptroller.options.address;
       }
 
-
-      ContractFactory
-
       // Register new pool with FusePoolDirectory
       let receipt;
       try {
-        receipt = await this.contracts.FusePoolDirectory.methods
+        receipt = await this.contracts.FusePoolDirectory
           .deployPool(
             poolName,
             implementationAddress,
@@ -224,8 +218,8 @@ export default class Fuse {
             maxAssets,
             liquidationIncentive,
             priceOracle,
+            options
           )
-          .send(options);
       } catch (error) {
         throw "Deployment and registration of new Fuse pool failed: " + (error.message ? error.message : error);
       }
@@ -248,13 +242,11 @@ export default class Fuse {
 
       // Whitelist
       if (enforceWhitelist) {
-        const comptroller = createContract(
-          poolAddress,
-          JSON.parse(contracts["contracts/Comptroller.sol:Comptroller"].abi),
-        );
+        const comptroller = createContract(poolAddress, JSON.parse(contracts["contracts/Comptroller.sol:Comptroller"].abi),);
 
         // Already enforced so now we just need to add the addresses
-        await comptroller.methods._setWhitelistStatuses(whitelist, Array(whitelist.length).fill(true)).send(options);
+        const comptrollerWithSigner = comptroller.connect(await this.provider.getSigner());
+        await comptrollerWithSigner._setWhitelistStatuses(whitelist, Array(whitelist.length).fill(true), options);
       }
 
       return [poolAddress, implementationAddress, priceOracle];
@@ -286,6 +278,7 @@ export default class Fuse {
 
       let deployArgs = [];
 
+      // TODO test deployments. I think options shouldn't be necessary cause we already have a signer but i'm not sure
       switch (model) {
         case "PreferredPriceOracle":
           // Deploy ChainlinkPriceOracle
@@ -313,25 +306,30 @@ export default class Fuse {
             );
 
           // Deploy PreferredPriceOracle
-          var priceOracle = new this.web3.eth.Contract(oracleContracts["PreferredPriceOracle"].abi);
+          var priceOracle = new utils.Interface(oracleContracts["PreferredPriceOracle"].abi);
+          // Test deployment
           deployArgs = [conf.chainlinkPriceOracle, conf.secondaryPriceOracle];
-          priceOracle = await priceOracle
-            .deploy({
-              data: oracleContracts["PreferredPriceOracle"].bin,
-              arguments: deployArgs,
-            })
-            .send(options);
+          priceOracle = new ContractFactory(priceOracle, oracleContracts["PreferredPriceOracle"].bin, await this.provider.getSigner())
+          priceOracle = priceOracle.deploy(...deployArgs)
+
+          // priceOracle = await priceOracle
+          //   .deploy({
+          //     data: oracleContracts["PreferredPriceOracle"].bin,
+          //     arguments: deployArgs,
+          //   })
+          //   .send(options);
 
           break;
         case "ChainlinkPriceOracle":
-          var priceOracle = new this.web3.eth.Contract(oracleContracts["ChainlinkPriceOracle"].abi);
+          var priceOracle = new utils.Interface(oracleContracts["ChainlinkPriceOracle"].abi);
           deployArgs = [conf.maxSecondsBeforePriceIsStale ? conf.maxSecondsBeforePriceIsStale : 0];
-          priceOracle = await priceOracle
-            .deploy({
-              data: oracleContracts["ChainlinkPriceOracle"].bin,
-              arguments: deployArgs,
-            })
-            .send(options);
+          priceOracle = await ContractFactory(priceOracle, oracleContracts["ChainlinkPriceOracle"].bin, await this.provider.getSigner()  )
+          const deployedPriceOracle = await priceOracle.deploy(...deployArgs)
+          // .deploy({
+            //   data: oracleContracts["ChainlinkPriceOracle"].bin,
+            //   arguments: deployArgs,
+            // })
+            // .send(options);
           break;
         case "UniswapAnchoredView":
           // Input validation/default config
@@ -342,9 +340,7 @@ export default class Fuse {
           if (conf.anchorPeriod === undefined || conf.anchorPeriod === null) conf.anchorPeriod = 30 * 60;
 
           // Deploy UniswapAnchoredView with ETH token config
-          var priceOracle = new this.web3.eth.Contract(
-            JSON.parse(openOracleContracts["contracts/Uniswap/UniswapAnchoredView.sol:UniswapAnchoredView"].abi),
-          );
+          var priceOracle = new utils.Interface(JSON.parse(openOracleContracts["contracts/Uniswap/UniswapAnchoredView.sol:UniswapAnchoredView"].abi));
 
           var PriceSource = {
             FIXED_ETH: 0,
@@ -374,21 +370,21 @@ export default class Fuse {
             conf.maxSecondsBeforePriceIsStale ? conf.maxSecondsBeforePriceIsStale : 0,
           ];
 
-          priceOracle = await priceOracle
-            .deploy({
-              data: "0x" + openOracleContracts["contracts/Uniswap/UniswapAnchoredView.sol:UniswapAnchoredView"].bin,
-              arguments: deployArgs,
-            })
-            .send(options);
+          priceOracle = new ContractFactory(priceOracle, openOracleContracts["contracts/Uniswap/UniswapAnchoredView.sol:UniswapAnchoredView"].bin, await this.provider.getSigner())
+          priceOracle = await priceOracle.deploy(...deployArgs)
+
+          // priceOracle = await priceOracle
+          //   .deploy({
+          //     data: "0x" + openOracleContracts["contracts/Uniswap/UniswapAnchoredView.sol:UniswapAnchoredView"].bin,
+          //     arguments: deployArgs,
+          //   })
+          //   .send(options);
 
           // Post reported ETH/USD price or (if price has never been reported) have user report and post price
-          const priceData = createContract(
-            Fuse.OPEN_ORACLE_PRICE_DATA_CONTRACT_ADDRESS,
-            JSON.parse(openOracleContracts["contracts/OpenOraclePriceData.sol:OpenOraclePriceData"].abi),
-          );
+          const priceData = createContract(Fuse.OPEN_ORACLE_PRICE_DATA_CONTRACT_ADDRESS, JSON.parse(openOracleContracts["contracts/OpenOraclePriceData.sol:OpenOraclePriceData"].abi));
 
           // If the price of ETH is more than 0? then postPrices (?)
-          if (BigNumber.from(await priceData.getPrice(conf.reporter, "ETH")).gt(BigNumber.from(0)))
+          if (BigNumber.from(await priceData.getPrice(conf.reporter, "ETH")).gt(constants.Zero))
             await priceOracle.postPrices([], [], ["ETH"], { ...options });
           else
             prompt(
@@ -398,9 +394,8 @@ export default class Fuse {
           break;
         case "UniswapView":
           if (conf.anchorPeriod === undefined || conf.anchorPeriod === null) conf.anchorPeriod = 30 * 60;
-          var priceOracle = new this.web3.eth.Contract(
-            JSON.parse(openOracleContracts["contracts/Uniswap/UniswapView.sol:UniswapView"].abi),
-          );
+
+          var priceOracle = new utils.Interface( JSON.parse(openOracleContracts["contracts/Uniswap/UniswapView.sol:UniswapView"].abi) );
           deployArgs = [
             conf.anchorPeriod,
             conf.tokenConfigs !== undefined ? conf.tokenConfigs : [],
@@ -408,65 +403,75 @@ export default class Fuse {
             conf.isPublic ? true : false,
             conf.maxSecondsBeforePriceIsStale ? conf.maxSecondsBeforePriceIsStale : 0,
           ];
-          priceOracle = await priceOracle
-            .deploy({
-              data: "0x" + openOracleContracts["contracts/Uniswap/UniswapView.sol:UniswapView"].bin,
-              arguments: deployArgs,
-            })
-            .send(options);
+          priceOracle = new ContractFactory(priceOracle, openOracleContracts["contracts/Uniswap/UniswapView.sol:UniswapView"].bin, await this.provider.getSigner())
+          priceOracle = await priceOracle.deploy(...deployArgs)
+          // await priceOracle
+          //   .deploy({
+          //     data: "0x" + openOracleContracts["contracts/Uniswap/UniswapView.sol:UniswapView"].bin,
+          //     arguments: deployArgs,
+          //   })
+          //   .send(options);
           break;
         case "UniswapLpTokenPriceOracle":
-          var priceOracle = new this.web3.eth.Contract(oracleContracts["UniswapLpTokenPriceOracle"].abi);
+          var priceOracle = new utils.Interface(oracleContracts["UniswapLpTokenPriceOracle"].abi);
           deployArgs = [conf.useRootOracle ? true : false];
-          priceOracle = await priceOracle
-            .deploy({
-              data: oracleContracts["UniswapLpTokenPriceOracle"].bin,
-              arguments: deployArgs,
-            })
-            .send(options);
+          priceOracle = new ContractFactory(priceOracle, oracleContracts["UniswapLpTokenPriceOracle"].bin, await this.provider.getSigner())
+          priceOracle = await priceOracle.deploy(...deployArgs)
+          // await priceOracle
+          //   .deploy({
+          //     data: oracleContracts["UniswapLpTokenPriceOracle"].bin,
+          //     arguments: deployArgs,
+          //   })
+          //   .send(options);
           break;
         case "Keep3rPriceOracle":
-          var priceOracle = new this.web3.eth.Contract(oracleContracts["Keep3rPriceOracle"].abi);
+          var priceOracle = new utils.Interface(oracleContracts["Keep3rPriceOracle"].abi);
           deployArgs = [conf.sushiswap ? true : false];
-          priceOracle = await priceOracle
-            .deploy({
-              data: oracleContracts["Keep3rPriceOracle"].bin,
-              arguments: deployArgs,
-            })
-            .send(options);
+          priceOracle = new ContractFactory(priceOracle, oracleContracts["Keep3rPriceOracle"].bin, await this.provider.getSigner())
+          priceOracle = await priceOracle.deploy(...deployArgs)
+          // await priceOracle
+          //   .deploy({
+          //     data: oracleContracts["Keep3rPriceOracle"].bin,
+          //     arguments: deployArgs,
+          //   })
+          //   .send(options);
           break;
         case "MasterPriceOracle":
-          var priceOracle = new this.web3.eth.Contract(oracleContracts["MasterPriceOracle"].abi);
+          var priceOracle = new utils.Interface(oracleContracts["MasterPriceOracle"].abi);
           deployArgs = [
             conf.underlyings ? conf.underlyings : [],
             conf.oracles ? conf.oracles : [],
             conf.admin ? conf.admin : options.from,
             conf.canAdminOverwrite ? true : false,
           ];
-          priceOracle = await priceOracle
-            .deploy({
-              data: oracleContracts["MasterPriceOracle"].bin,
-              arguments: deployArgs,
-            })
-            .send(options);
+          priceOracle = new ContractFactory(priceOracle, oracleContracts["MasterPriceOracle"].bin, await this.provider.getSigner())
+          priceOracle = await priceOracle.deploy(...deployArgs)
+          // await priceOracle
+          //   .deploy({
+          //     data: oracleContracts["MasterPriceOracle"].bin,
+          //     arguments: deployArgs,
+          //   })
+          //   .send(options);
           break;
         case "SimplePriceOracle":
-          var priceOracle = new this.web3.eth.Contract(
-            JSON.parse(contracts["contracts/SimplePriceOracle.sol:SimplePriceOracle"].abi),
-          );
-          priceOracle = await priceOracle
-            .deploy({
-              data: "0x" + contracts["contracts/SimplePriceOracle.sol:SimplePriceOracle"].bin,
-            })
-            .send(options);
+          var priceOracle = new utils.Interface(JSON.parse(contracts["contracts/SimplePriceOracle.sol:SimplePriceOracle"].abi));
+          priceOracle = new ContractFactory(priceOracle,  contracts["contracts/SimplePriceOracle.sol:SimplePriceOracle"].bin, await this.provider.getSigner())
+          priceOracle = await priceOracle.deploy()
+          // await priceOracle
+          //   .deploy({
+          //     data: "0x" + contracts["contracts/SimplePriceOracle.sol:SimplePriceOracle"].bin,
+          //   })
+          //   .send(options);
           break;
         default:
-          var priceOracle = new this.web3.eth.Contract(oracleContracts[model].abi);
-          priceOracle = await priceOracle
-            .deploy({
-              data: oracleContracts[model].bin,
-            })
-            .send(options);
+          var priceOracle = new utils.Interface(oracleContracts[model].abi);
+          priceOracle = new ContractFactory(priceOracle, oracleContracts[model].bin, await this.provider.getSigner())
+          priceOracle = priceOracle.deploy()
+          // await priceOracle
+          //   .deploy({
+          //     data: oracleContracts[model].bin,
+          //   })
+          //   .send(options);
           break;
       }
 
@@ -482,31 +487,38 @@ export default class Fuse {
       options,
     ) {
       if (!implementationAddress) {
-        var comptroller = new this.web3.eth.Contract(
-          JSON.parse(contracts["contracts/Comptroller.sol:Comptroller"].abi),
-        );
-        comptroller = await comptroller
-          .deploy({
-            data: "0x" + contracts["contracts/Comptroller.sol:Comptroller"].bin,
-          })
-          .send(options);
+
+        var comptroller = new utils.Interface( JSON.parse(contracts["contracts/Comptroller.sol:Comptroller"].abi) );
+        comptroller = new ContractFactory(comptroller, contracts["contracts/Comptroller.sol:Comptroller"].bin, await this.provider.getSigner())
+        comptroller = await comptroller.deploy()
+
+        // await comptroller
+        //   .deploy({
+        //     data: "0x" + contracts["contracts/Comptroller.sol:Comptroller"].bin,
+        //   })
+        //   .send(options);
+
         implementationAddress = comptroller.options.address;
       }
 
-      var unitroller = new this.web3.eth.Contract(JSON.parse(contracts["contracts/Unitroller.sol:Unitroller"].abi));
-      unitroller = await unitroller
-        .deploy({
-          data: "0x" + contracts["contracts/Unitroller.sol:Unitroller"].bin,
-        })
-        .send(options);
-      await unitroller.methods._setPendingImplementation(comptroller.options.address).send(options);
+      var unitroller = new utils.Interface(JSON.parse(contracts["contracts/Unitroller.sol:Unitroller"].abi));
+      unitroller = await unitroller.deploy()
+
+      // await unitroller
+      //   .deploy({
+      //     data: "0x" + contracts["contracts/Unitroller.sol:Unitroller"].bin,
+      //   })
+      //   .send(options);
+
+      // TODO: Will come back to this. How is comptroller here if its 
+      await unitroller._setPendingImplementation(comptroller.options.address).send(options);
       await comptroller.methods._become(unitroller.options.address).send(options);
 
       comptroller.options.address = unitroller.options.address;
       if (closeFactor) await comptroller.methods._setCloseFactor(closeFactor).send(options);
       if (maxAssets) await comptroller.methods._setMaxAssets(maxAssets).send(options);
       if (liquidationIncentive) await comptroller.methods._setLiquidationIncentive(liquidationIncentive).send(options);
-      if (priceOracle) await comptroller.methods._setPriceOracle(priceOracle).send(options);
+      if (priceOracle) await comptroller.callStatic._setPriceOracle(priceOracle).send(options);
 
       return [unitroller.options.address, implementationAddress];
     };
@@ -584,15 +596,18 @@ export default class Fuse {
       }
 
       // Deploy InterestRateModel
-      var interestRateModel = new this.web3.eth.Contract(
-        JSON.parse(contracts["contracts/" + model + ".sol:" + model].abi),
+      var interestRateModel = new utils.Interface(
+        JSON.parse(contracts["contracts/" + model + ".sol:" + model].abi)
       );
-      interestRateModel = await interestRateModel
-        .deploy({
-          data: "0x" + contracts["contracts/" + model + ".sol:" + model].bin,
-          arguments: deployArgs,
-        })
-        .send(options);
+
+      interestRateModel = new ContractFactory(interestRateModel, contracts["contracts/" + model + ".sol:" + model].bin, await this.provider.getSigner())
+      interestRateModel = await interestRateModel.deploy(deployArgs)
+      // await interestRateModel
+      //   .deploy({
+      //     data: "0x" + contracts["contracts/" + model + ".sol:" + model].bin,
+      //     arguments: deployArgs,
+      //   })
+      //   .send(options);
       return interestRateModel.options.address;
     };
 
@@ -616,7 +631,7 @@ export default class Fuse {
       if (BigNumber.from(reserveFactor).isNegative()) throw "Reserve factor cannot be negative.";
       if (BigNumber.from(adminFee).isNegative()) throw "Admin fee cannot be negative.";
       if (!BigNumber.from(reserveFactor).isZero() || !BigNumber.from(adminFee).isZero()) {
-        var fuseFee = await this.contracts.FuseFeeDistributor.methods.interestFeeRate().call();
+        var fuseFee = await this.contracts.FuseFeeDistributor.callStatic.interestFeeRate();
         if (
           BigNumber.from(reserveFactor)
             .add(BigNumber.from(adminFee))
@@ -673,19 +688,22 @@ export default class Fuse {
 
       // Deploy CEtherDelegate implementation contract if necessary
       if (!implementationAddress) {
-        var cEtherDelegate = new this.web3.eth.Contract(
-          JSON.parse(contracts["contracts/CEtherDelegate.sol:CEtherDelegate"].abi),
+
+        var cEtherDelegate = new utils.Interface(
+          JSON.parse(contracts["contracts/CEtherDelegate.sol:CEtherDelegate"].abi)
         );
-        cEtherDelegate = await cEtherDelegate
-          .deploy({
-            data: "0x" + contracts["contracts/CEtherDelegate.sol:CEtherDelegate"].bin,
-          })
-          .send(options);
+        cEtherDelegate = new ContractFactory(cEtherDelegate, contracts["contracts/CEtherDelegate.sol:CEtherDelegate"].bin, await this.provider.getSigner())
+        cEtherDelegate = await cEtherDelegate.deploy()
+        // await cEtherDelegate
+        //   .deploy({
+        //     data: "0x" + contracts["contracts/CEtherDelegate.sol:CEtherDelegate"].bin,
+        //   })
+        //   .send(options);
         implementationAddress = cEtherDelegate.options.address;
       }
 
       // Deploy CEtherDelegator proxy contract if necessary
-      var cEtherDelegator = new this.web3.eth.Contract(
+      var cEtherDelegator = new utils.Interface(
         JSON.parse(contracts["contracts/CEtherDelegator.sol:CEtherDelegator"].abi),
       );
       let deployArgs = [
@@ -701,26 +719,28 @@ export default class Fuse {
         reserveFactor ? reserveFactor : 0,
         adminFee ? adminFee : 0,
       ];
-      cEtherDelegator = await cEtherDelegator
-        .deploy({
-          data: "0x" + contracts["contracts/CEtherDelegator.sol:CEtherDelegator"].bin,
-          arguments: deployArgs,
-        })
-        .send(options);
+      cEtherDelegator = new ContractFactory(cEtherDelegator,contracts["contracts/CEtherDelegator.sol:CEtherDelegator"].bin, await this.provider.getSigner())
+      cEtherDelegate = await cEtherDelegate.deploy(deployArgs)
+      // await cEtherDelegator
+      //   .deploy({
+      //     data: "0x" + contracts["contracts/CEtherDelegator.sol:CEtherDelegator"].bin,
+      //     arguments: deployArgs,
+      //   })
+      //   .send(options);
 
       // Register new asset with Comptroller
-      var comptroller = new this.web3.eth.Contract(
-        JSON.parse(contracts["contracts/Comptroller.sol:Comptroller"].abi),
+      var comptroller = new Contract(
         conf.comptroller,
+        JSON.parse(contracts["contracts/Comptroller.sol:Comptroller"].abi),
+        await this.provider.getSigner()
       );
       cEtherDelegator.options.jsonInterface = JSON.parse(contracts["contracts/CEtherDelegate.sol:CEtherDelegate"].abi);
 
       if (supportMarket) {
         if (collateralFactor)
-          await comptroller.methods
-            ._supportMarketAndSetCollateralFactor(cEtherDelegator.options.address, collateralFactor)
-            .send(options);
-        else await comptroller.methods._supportMarket(cEtherDelegator.options.address).send(options);
+          await comptroller
+            ._supportMarketAndSetCollateralFactor(cEtherDelegator.options.address, collateralFactor, options)
+        else await comptroller._supportMarket(cEtherDelegator.options.address, options);
       }
 
       // Return cToken proxy and implementation contract addresses
@@ -744,20 +764,20 @@ export default class Fuse {
         conf.initialExchangeRateMantissa === null ||
         BigNumber.from(conf.initialExchangeRateMantissa).isZero()
       ) {
-        var erc20 = new this.web3.eth.Contract(
+        var erc20 = createContract(
           JSON.parse(contracts["contracts/EIP20Interface.sol:EIP20Interface"].abi),
           conf.underlying,
         );
-        var underlyingDecimals = await erc20.methods.decimals().call();
+        var underlyingDecimals = await erc20.callStatic.decimals();
         conf.initialExchangeRateMantissa = utils.parseUnits("0.02", 18)
           .mul(BigNumber.from(10).pow(BigNumber.from(underlyingDecimals)))
           .div(BigNumber.from(10).pow(BigNumber.from(conf.decimals)));
       }
 
       // Get Comptroller
-      var comptroller = new this.web3.eth.Contract(
+      var comptroller = createContract(
         JSON.parse(contracts["contracts/Comptroller.sol:Comptroller"].abi),
-        conf.comptroller,
+        conf.comptroller
       );
 
       // Check for price feed assuming !bypassPriceFeedCheck
@@ -765,20 +785,22 @@ export default class Fuse {
 
       // Deploy CErc20Delegate implementation contract if necessary
       if (!implementationAddress) {
-        var cErc20Delegate = new this.web3.eth.Contract(
-          JSON.parse(contracts["contracts/CErc20Delegate.sol:CErc20Delegate"].abi),
+        var cErc20Delegate = new utils.Interface(
+          JSON.parse(contracts["contracts/CErc20Delegate.sol:CErc20Delegate"].abi)
         );
-        cErc20Delegate = await cErc20Delegate
-          .deploy({
-            data: "0x" + contracts["contracts/CErc20Delegate.sol:CErc20Delegate"].bin,
-          })
-          .send(options);
+        cErc20Delegate = new ContractFactory(cErc20Delegate, contracts["contracts/CErc20Delegate.sol:CErc20Delegate"].bin, await this.provider.getSigner())
+        cErc20Delegate = await cErc20Delegate.deploy()
+        // await cErc20Delegate
+        //   .deploy({
+        //     data: "0x" + contracts["contracts/CErc20Delegate.sol:CErc20Delegate"].bin,
+        //   })
+        //   .send(options);
         implementationAddress = cErc20Delegate.options.address;
       }
 
       // Deploy CErc20Delegator proxy contract if necessary
-      var cErc20Delegator = new this.web3.eth.Contract(
-        JSON.parse(contracts["contracts/CErc20Delegator.sol:CErc20Delegator"].abi),
+      var cErc20Delegator = new utils.Interface(
+        JSON.parse(contracts["contracts/CErc20Delegator.sol:CErc20Delegator"].abi)
       );
       let deployArgs = [
         conf.underlying,
@@ -794,22 +816,23 @@ export default class Fuse {
         reserveFactor ? reserveFactor : 0,
         adminFee ? adminFee : 0,
       ];
-      cErc20Delegator = await cErc20Delegator
-        .deploy({
-          data: "0x" + contracts["contracts/CErc20Delegator.sol:CErc20Delegator"].bin,
-          arguments: deployArgs,
-        })
-        .send(options);
+
+      cErc20Delegator = new ContractFactory(cErc20Delegator, contracts["contracts/CErc20Delegator.sol:CErc20Delegator"].bin, await this.provider.getSigner())
+      cErc20Delegator = await cErc20Delegator.deploy(deployArgs)
+      // await cErc20Delegator
+      //   .deploy({
+      //     data: "0x" + contracts["contracts/CErc20Delegator.sol:CErc20Delegator"].bin,
+      //     arguments: deployArgs,
+      //   })
+      //   .send(options);
 
       // Register new asset with Comptroller
       cErc20Delegator.options.jsonInterface = JSON.parse(contracts["contracts/CErc20Delegate.sol:CErc20Delegate"].abi);
 
       if (supportMarket) {
         if (collateralFactor)
-          await comptroller.methods
-            ._supportMarketAndSetCollateralFactor(cErc20Delegator.options.address, collateralFactor)
-            .send(options);
-        else await comptroller.methods._supportMarket(cErc20Delegator.options.address).send(options);
+          await comptroller._supportMarketAndSetCollateralFactor(cErc20Delegator.options.address, collateralFactor, options);
+        else await comptroller._supportMarket(cErc20Delegator.options.address, options);
       }
 
       // Return cToken proxy and implementation contract addresses
@@ -840,41 +863,41 @@ export default class Fuse {
 
     this.getInterestRateModel = async function (assetAddress) {
       // Get interest rate model address from asset address
-      var assetContract = new this.web3.eth.Contract(
+      var assetContract = createContract(
         JSON.parse(contracts["contracts/CTokenInterfaces.sol:CTokenInterface"].abi),
-        assetAddress,
+        assetAddress
       );
-      var interestRateModelAddress = await assetContract.methods.interestRateModel().call();
+      var interestRateModelAddress = await assetContract.interestRateModel();
 
       var interestRateModel = await this.identifyInterestRateModel(interestRateModelAddress);
 
+      // TODO
       await interestRateModel.init(this.web3, interestRateModelAddress, assetAddress);
       return interestRateModel;
     };
 
-    //
     this.checkForCErc20PriceFeed = async function (comptroller, conf) {
       // Check for ChainlinkPriceOracle with a corresponding feed
-      var priceOracle = await comptroller.methods.oracle().call();
-      var chainlinkPriceOracle = new this.web3.eth.Contract(oracleContracts["ChainlinkPriceOracle"].abi, priceOracle);
+      var priceOracle = await comptroller.callStatic.oracle();
+      var chainlinkPriceOracle = createContract(priceOracle, oracleContracts["ChainlinkPriceOracle"].abi);
 
       if (conf.underlying.toLowerCase() == Fuse.WETH_ADDRESS.toLowerCase()) var chainlinkPriceFeed = true;
       else
         try {
-          var chainlinkPriceFeed = await chainlinkPriceOracle.methods.hasPriceFeed(conf.underlying).call();
+          var chainlinkPriceFeed = await chainlinkPriceOracle.callStatic.hasPriceFeed(conf.underlying);
         } catch {}
 
       if (chainlinkPriceFeed === undefined || !chainlinkPriceFeed) {
         // Check for PreferredPriceOracle with underlying ChainlinkPriceOracle with a corresponding feed
-        var preferredPriceOracle = new this.web3.eth.Contract(oracleContracts["PreferredPriceOracle"].abi, priceOracle);
+        var preferredPriceOracle = createContract(priceOracle, oracleContracts["PreferredPriceOracle"].abi);
 
         try {
-          var chainlinkPriceOracle = await preferredPriceOracle.methods.chainlinkOracle().call();
-          chainlinkPriceOracle = new this.web3.eth.Contract(
-            oracleContracts["ChainlinkPriceOracle"].abi,
+          var chainlinkPriceOracle = await preferredPriceOracle.callStatic.chainlinkOracle();
+          chainlinkPriceOracle = createContract(
             chainlinkPriceOracle,
+            oracleContracts["ChainlinkPriceOracle"].abi,
           );
-          var chainlinkPriceFeed = await chainlinkPriceOracle.methods.hasPriceFeed(conf.underlying).call();
+          var chainlinkPriceFeed = await chainlinkPriceOracle.callStatic.hasPriceFeed(conf.underlying);
         } catch {}
       }
 
@@ -883,46 +906,46 @@ export default class Fuse {
         var isUniswapAnchoredView = false;
 
         try {
-          var uniswapOrUniswapAnchoredView = new this.web3.eth.Contract(
-            JSON.parse(openOracleContracts["contracts/Uniswap/UniswapAnchoredView.sol:UniswapAnchoredView"].abi),
+          var uniswapOrUniswapAnchoredView = createContract(
             priceOracle,
+            JSON.parse(openOracleContracts["contracts/Uniswap/UniswapAnchoredView.sol:UniswapAnchoredView"].abi),
           );
-          await uniswapOrUniswapAnchoredView.methods.IS_UNISWAP_ANCHORED_VIEW().call();
+          await uniswapOrUniswapAnchoredView.callStatic.IS_UNISWAP_ANCHORED_VIEW();
           isUniswapAnchoredView = true;
         } catch {
           try {
-            var uniswapOrUniswapAnchoredView = new this.web3.eth.Contract(
-              JSON.parse(openOracleContracts["contracts/Uniswap/UniswapView.sol:UniswapView"].abi),
+            var uniswapOrUniswapAnchoredView = createContract(
               priceOracle,
+              JSON.parse(openOracleContracts["contracts/Uniswap/UniswapView.sol:UniswapView"].abi),
             );
-            await uniswapOrUniswapAnchoredView.methods.IS_UNISWAP_VIEW().call();
+            await uniswapOrUniswapAnchoredView.callStatic.IS_UNISWAP_VIEW();
           } catch {
             // Check for PreferredPriceOracle with underlying UniswapAnchoredView
-            var preferredPriceOracle = new this.web3.eth.Contract(
-              oracleContracts["PreferredPriceOracle"].abi,
+            var preferredPriceOracle = createContract(
               priceOracle,
+              oracleContracts["PreferredPriceOracle"].abi,
             );
 
             try {
-              var uniswapOrUniswapAnchoredView = await preferredPriceOracle.methods.secondaryOracle().call();
+              var uniswapOrUniswapAnchoredView = await preferredPriceOracle.callStatic.secondaryOracle();
             } catch {
               throw "Underlying token price for this asset is not available via this oracle.";
             }
 
             try {
-              uniswapOrUniswapAnchoredView = new this.web3.eth.Contract(
-                JSON.parse(openOracleContracts["contracts/Uniswap/UniswapAnchoredView.sol:UniswapAnchoredView"].abi),
+              uniswapOrUniswapAnchoredView = createContract(
                 uniswapOrUniswapAnchoredView,
+                JSON.parse(openOracleContracts["contracts/Uniswap/UniswapAnchoredView.sol:UniswapAnchoredView"].abi),
               );
-              await uniswapOrUniswapAnchoredView.methods.IS_UNISWAP_ANCHORED_VIEW().call();
+              await uniswapOrUniswapAnchoredView.callStatic.IS_UNISWAP_ANCHORED_VIEW();
               isUniswapAnchoredView = true;
             } catch {
               try {
-                uniswapOrUniswapAnchoredView = new this.web3.eth.Contract(
-                  JSON.parse(openOracleContracts["contracts/Uniswap/UniswapView.sol:UniswapView"].abi),
+                uniswapOrUniswapAnchoredView = createContract(
                   uniswapOrUniswapAnchoredView,
+                  JSON.parse(openOracleContracts["contracts/Uniswap/UniswapView.sol:UniswapView"].abi),
                 );
-                await uniswapOrUniswapAnchoredView.methods.IS_UNISWAP_VIEW().call();
+                await uniswapOrUniswapAnchoredView.callStatic.IS_UNISWAP_VIEW();
               } catch {
                 throw "Underlying token price not available via ChainlinkPriceOracle, and no UniswapAnchoredView or UniswapView was found.";
               }
@@ -932,15 +955,15 @@ export default class Fuse {
 
         // Check if the token already exists
         try {
-          await uniswapOrUniswapAnchoredView.methods.getTokenConfigByUnderlying(conf.underlying).call();
+          await uniswapOrUniswapAnchoredView.callStatic.getTokenConfigByUnderlying(conf.underlying);
         } catch {
           // If not, add it!
-          var underlyingToken = new this.web3.eth.Contract(
-            JSON.parse(contracts["contracts/EIP20Interface.sol:EIP20Interface"].abi),
+          var underlyingToken = createContract(
             conf.underlying,
+            JSON.parse(contracts["contracts/EIP20Interface.sol:EIP20Interface"].abi),
           );
-          var underlyingSymbol = await underlyingToken.methods.symbol().call();
-          var underlyingDecimals = await underlyingToken.methods.decimals().call();
+          var underlyingSymbol = await underlyingToken.callStatic.symbol();
+          var underlyingDecimals = await underlyingToken.callStatic.decimals();
 
           const PriceSource = {
             FIXED_ETH: 0,
@@ -949,9 +972,10 @@ export default class Fuse {
             TWAP: 3,
           };
 
+          const uniswapOrUniswapAnchoredViewWithSigner = uniswapOrUniswapAnchoredView.connect(await this.provider.getSigner())
           if (conf.underlying.toLowerCase() == Fuse.WETH_ADDRESS.toLowerCase()) {
             // WETH
-            await uniswapOrUniswapAnchoredView.methods
+            await uniswapOrUniswapAnchoredViewWithSigner
               .add([
                 {
                   underlying: conf.underlying,
@@ -962,12 +986,12 @@ export default class Fuse {
                   uniswapMarket: "0x0000000000000000000000000000000000000000",
                   isUniswapReversed: false,
                 },
-              ])
-              .send({ ...options });
+              ], options)
+              // .send({ ...options });
           } else if (conf.underlying === "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48") {
             // USDC
             if (isUniswapAnchoredView) {
-              await uniswapOrUniswapAnchoredView.methods
+              await uniswapOrUniswapAnchoredViewWithSigner
                 .add([
                   {
                     underlying: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
@@ -978,10 +1002,10 @@ export default class Fuse {
                     uniswapMarket: "0x0000000000000000000000000000000000000000",
                     isUniswapReversed: false,
                   },
-                ])
-                .send({ ...options });
+                ], options)
+                // .send({ ...options });
             } else {
-              await uniswapOrUniswapAnchoredView.methods
+              await uniswapOrUniswapAnchoredViewWithSigner
                 .add([
                   {
                     underlying: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
@@ -992,20 +1016,20 @@ export default class Fuse {
                     uniswapMarket: "0xb4e16d0168e52d35cacd2c6185b44281ec28c9dc",
                     isUniswapReversed: false,
                   },
-                ])
-                .send({ ...options });
-              await uniswapOrUniswapAnchoredView.methods
-                .postPrices(["0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"])
-                .send({ ...options });
+                ], options)
+                // .send({ ...options });
+              await uniswapOrUniswapAnchoredViewWithSigner
+                .postPrices(["0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"], options)
+                // .send({ ...options });
             }
           } else {
             // Ask about fixed prices if UniswapAnchoredView or if UniswapView is not public; otherwise, prompt for Uniswap V2 pair
-            if (isUniswapAnchoredView || !(await uniswapOrUniswapAnchoredView.methods.isPublic().call())) {
+            if (isUniswapAnchoredView || !(await uniswapOrUniswapAnchoredView.callStatic.isPublic())) {
               // Check for fixed ETH
               var fixedEth = confirm("Should the price of this token be fixed to 1 ETH?");
 
               if (fixedEth) {
-                await uniswapOrUniswapAnchoredView.methods
+                await uniswapOrUniswapAnchoredViewWithSigner
                   .add([
                     {
                       underlying: conf.underlying,
@@ -1016,8 +1040,8 @@ export default class Fuse {
                       uniswapMarket: "0x0000000000000000000000000000000000000000",
                       isUniswapReversed: false,
                     },
-                  ])
-                  .send({ ...options });
+                  ], options)
+                  // .send({ ...options });
               } else {
                 // Check for fixed USD
                 var msg = "Should the price of this token be fixed to 1 USD?";
@@ -1046,9 +1070,8 @@ export default class Fuse {
                   // UniswapView only: add USDC token config if not present so price oracle can convert from USD to ETH
                   if (!isUniswapAnchoredView) {
                     try {
-                      await uniswapOrUniswapAnchoredView.methods
+                      await uniswapOrUniswapAnchoredView.callStatic
                         .getTokenConfigByUnderlying("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48")
-                        .call();
                     } catch (error) {
                       tokenConfigs.push({
                         underlying: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
@@ -1063,13 +1086,13 @@ export default class Fuse {
                   }
 
                   // Add token config(s)
-                  await uniswapOrUniswapAnchoredView.methods.add(tokenConfigs).send({ ...options });
+                  await uniswapOrUniswapAnchoredViewWithSigner.add(tokenConfigs, options);
 
                   // UniswapView only: post USDC price
                   if (!isUniswapAnchoredView)
-                    await uniswapOrUniswapAnchoredView.methods
-                      .postPrices(["0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"])
-                      .send({ ...options });
+                    await uniswapOrUniswapAnchoredViewWithSigner
+                      .postPrices(["0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"], options)
+                      // .send({ ...options });
                 } else await promptForUniswapV2Pair(this); // Prompt for Uniswap V2 pair
               }
             } else await promptForUniswapV2Pair(this); // Prompt for Uniswap V2 pair
@@ -1109,7 +1132,7 @@ export default class Fuse {
               }
 
               // Add asset to oracle
-              await uniswapOrUniswapAnchoredView.methods
+              await uniswapOrUniswapAnchoredViewWithSigner
                 .add([
                   {
                     underlying: conf.underlying,
@@ -1120,24 +1143,24 @@ export default class Fuse {
                     uniswapMarket: uniswapV2Pair,
                     isUniswapReversed: !isNotReversed,
                   },
-                ])
-                .send({ ...options });
+                ], options)
+                // .send({ ...options });
 
               // Post first price
               if (isUniswapAnchoredView) {
                 // Post reported price or (if price has never been reported) have user report and post price
                 var priceData = new self.web3.eth.Contract(
                   JSON.parse(openOracleContracts["contracts/OpenOraclePriceData.sol:OpenOraclePriceData"].abi),
-                  await uniswapOrUniswapAnchoredView.methods.priceData().call(),
+                  await uniswapOrUniswapAnchoredView.callStatic.priceData(),
                 );
-                var reporter = await uniswapOrUniswapAnchoredView.methods.reporter().call();
+                var reporter = await uniswapOrUniswapAnchoredView.callStatic.reporter();
                 if (
-                  BigNumber.from(await priceData.methods.getPrice(reporter, underlyingSymbol).call())
+                  BigNumber.from(await priceData.callStatic.getPrice(reporter, underlyingSymbol))
                     .gt(constants.Zero)
                 )
-                  await uniswapOrUniswapAnchoredView.methods
-                    .postPrices([], [], [underlyingSymbol])
-                    .send({ ...options });
+                  await uniswapOrUniswapAnchoredViewWithSigner
+                    .postPrices([], [], [underlyingSymbol], options)
+                    // .send({ ...options });
                 else
                   prompt(
                     "It looks like prices have never been reported for " +
@@ -1147,7 +1170,7 @@ export default class Fuse {
                       ".",
                   );
               } else {
-                await uniswapOrUniswapAnchoredView.methods.postPrices([conf.underlying]).send({ ...options });
+                await uniswapOrUniswapAnchoredViewWithSigner.postPrices([conf.underlying], options)//.send({ ...options });
               }
             }
           }
