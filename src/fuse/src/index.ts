@@ -1,6 +1,6 @@
 /* eslint-disable */
 import Web3 from "web3";
-import { BigNumber, constants, ethers, getDefaultProvider, utils } from "ethers";
+import { BigNumber, constants, ContractFactory, ethers, getDefaultProvider, utils } from "ethers";
 
 import JumpRateModel from "./irm/JumpRateModel.js";
 import JumpRateModelV2 from "./irm/JumpRateModelV2.js";
@@ -208,6 +208,9 @@ export default class Fuse {
         // Reset the implementation Address to the newly deployed Comptroller's Address
         implementationAddress = deployedComptroller.options.address;
       }
+
+
+      ContractFactory
 
       // Register new pool with FusePoolDirectory
       let receipt;

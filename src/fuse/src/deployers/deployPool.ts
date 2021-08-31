@@ -1,5 +1,6 @@
 import { contracts } from "../contracts/compound-protocol.min.json";
 import Fuse from "..";
+import { createContract } from "../../../utils/web3";
 
 export default async function deployPool(
   fuse: Fuse,
@@ -8,10 +9,10 @@ export default async function deployPool(
   closeFactor: number,
   maxAssets: number,
   liquidationIncentive: number,
-  priceOracle:,
-  priceOracleConf,
-  options,
-  whitelist,
+  priceOracle: any,
+  priceOracleConf: any,
+  options: any,
+  whitelist: any,
 ) {
   // Deploy new price oracle via SDK if requested
   if (Fuse.ORACLES.indexOf(priceOracle) >= 0) {
@@ -36,8 +37,9 @@ export default async function deployPool(
   }
 
   // Register new pool with FusePoolDirectory
+  let receipt;
   try {
-    const receipt = await this.contracts.FusePoolDirectory.methods
+    receipt = await this.contracts.FusePoolDirectory.methods
       .deployPool(
         poolName,
         implementationAddress,
